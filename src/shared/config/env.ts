@@ -65,6 +65,12 @@ export interface AppEnv {
       reservationReminder: string;
     };
   };
+  /** Webhook de afiliados de n8n (el mismo de CLARA) para la categoría por documento. */
+  affiliateLookup: {
+    url: string;
+    authorization: string;
+    timeoutMs: number;
+  };
   phoneVerification: {
     /** `n8n` (webhooks enviar/validar-codigo) | `stub` (código en el log, solo local). */
     provider: string;
@@ -129,7 +135,7 @@ export function loadEnv(): AppEnv {
     providers: {
       payment: process.env.PAYMENT_PROVIDER ?? 'stub',
       messaging: process.env.MESSAGING_PROVIDER ?? 'stub',
-      documentLookup: process.env.DOCUMENT_LOOKUP_PROVIDER ?? 'stub',
+      documentLookup: process.env.DOCUMENT_LOOKUP_PROVIDER ?? 'n8n',
     },
     epayco: {
       // Integración personalizada (p_*). checkout.php responde en secure.payco.co.
@@ -157,6 +163,12 @@ export function loadEnv(): AppEnv {
         reservationReminder:
           process.env.META_TEMPLATE_RECORDATORIO ?? 'recordatorio_pago',
       },
+    },
+    affiliateLookup: {
+      // AFFILIATE_LOOKUP_URL; N8N_WEBHOOK_URL se acepta por compatibilidad con .env anteriores.
+      url: process.env.AFFILIATE_LOOKUP_URL || process.env.N8N_WEBHOOK_URL || '',
+      authorization: process.env.AFFILIATE_LOOKUP_AUTHORIZATION || process.env.WHATSAPP_AUTHORIZATION || '',
+      timeoutMs: parseInt(process.env.AFFILIATE_LOOKUP_TIMEOUT_MS ?? '25000', 10),
     },
     phoneVerification: {
       provider: process.env.PHONE_VERIFICATION_PROVIDER ?? 'n8n',

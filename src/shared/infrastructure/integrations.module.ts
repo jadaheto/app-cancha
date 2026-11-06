@@ -4,6 +4,7 @@ import { DOCUMENT_LOOKUP } from '../domain/ports/document-lookup.port';
 import { MESSAGING } from '../domain/ports/messaging.port';
 import { PAYMENT_GATEWAY } from '../domain/ports/payment-gateway.port';
 import { PHONE_VERIFICATION } from '../domain/ports/phone-verification.port';
+import { N8nDocumentLookupAdapter } from './adapters/n8n-document-lookup.adapter';
 import { N8nPhoneVerificationAdapter } from './adapters/n8n-phone-verification.adapter';
 import { StubPhoneVerificationAdapter } from './adapters/stub-phone-verification.adapter';
 import { EpaycoPaymentGatewayAdapter } from './adapters/epayco-payment-gateway.adapter';
@@ -39,7 +40,8 @@ const messagingProvider: Provider = {
 };
 const documentLookupProvider: Provider = {
   provide: DOCUMENT_LOOKUP,
-  useClass: StubDocumentLookupAdapter,
+  // n8n: webhook de afiliados (mismo de CLARA). stub: categoría por el último dígito (solo pruebas).
+  useClass: env.providers.documentLookup === 'n8n' ? N8nDocumentLookupAdapter : StubDocumentLookupAdapter,
 };
 
 const phoneVerificationProvider: Provider = {
@@ -57,11 +59,15 @@ const phoneVerificationProvider: Provider = {
 })
 export class IntegrationsModule {
   constructor() {
+    if (env.providers.documentLookup === 'stub') {
+      // eslint-disable-next-line no-console
+      console.warn('[Integraciones] DOCUMENT_LOOKUP_PROVIDER=stub: las categorías se INVENTAN por el último dígito del documento. Usa n8n en producción.');
+    }
     const { payment, messaging, documentLookup } = env.providers;
     const unimplemented: string[] = [];
     if (!['stub', 'epayco'].includes(payment)) unimplemented.push(`payment=${payment}`);
     if (!['stub', 'meta', 'n8n'].includes(messaging)) unimplemented.push(`messaging=${messaging}`);
-    if (documentLookup !== 'stub') unimplemented.push(`documentLookup=${documentLookup}`);
+    if (!['stub', 'n8n'].includes(documentLookup)) unimplemented.push(`documentLookup=${documentLookup}`);
     if (unimplemented.length > 0) {
       // Aviso para proveedores solicitados que aún no tienen adaptador real.
       // eslint-disable-next-line no-console
