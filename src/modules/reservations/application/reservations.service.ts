@@ -20,6 +20,7 @@ import {
 import { CourtsService } from '../../courts/application/courts.service';
 import { UsersService } from '../../users/application/users.service';
 import { PriceBreakdown, PricingService } from '../domain/pricing.service';
+import { TIME_SLOT_LABEL, timeSlotFromHour } from '../../../shared/domain/value-objects/time-slot';
 import {
   PaymentStatus,
   Reservation,
@@ -32,6 +33,20 @@ import {
 } from '../domain/reservation.repository';
 import { CreateReservationDto } from './dto/create-reservation.dto';
 import { QuoteDto } from './dto/quote.dto';
+
+export interface AvailabilitySlot {
+  start: string;
+  end: string;
+  available: boolean;
+  reason: 'reserved' | 'past' | null;
+  slotLabel: string;
+}
+
+export interface AvailabilityView {
+  courtId: string;
+  date: string;
+  slots: AvailabilitySlot[];
+}
 
 /** Datos normalizados de una confirmación (webhook) de ePayco. */
 export interface EpaycoConfirmationPayload {
@@ -85,7 +100,39 @@ export class ReservationsService {
     return { courtId: court.id, ...PricingService.calculate(court, category, start, end) };
   }
 
-  async create(dto: CreateReservationDto): Promise<Reservation> {
+  /**
+   * Grilla de disponibilidad por hora de una cancha en un día: cada bloque de
+   * 1 h dentro del horario de atención y si está libre. Los bloques ya pasados
+   * (hoy) se marcan como no disponibles. No incluye precio: la tarifa final
+   * depende de la categoría del cliente y se obtiene con `quote`.
+   */
+  async availability(courtId: string, date: string): Promise<AvailabilityView> {
+    const court = await this.courts.findById(courtId);
+    const { openHour, closeHour } = loadEnv().schedule;
+    const dayStart = new Date(`${date}T00:00:00-05:00`);
+    if (Number.isNaN(dayStart.getTime())) throw new ConflictException('Fecha inválida');
+    const dayEnd = new Date(dayStart.getTime() + 24 * 3_600_000);
+    const taken = await this.repo.findOverlapping(court.id, dayStart, dayEnd);
+    const now = Date.now();
+
+    const slots: AvailabilitySlot[] = [];
+    for (let h = openHour; h < closeHour; h++) {
+      const start = new Date(dayStart.getTime() + h * 3_600_000);
+      const end = new Date(start.getTime() + 3_600_000);
+      const busy = taken.some((r) => r.startTime < end && r.endTime > start);
+      const past = start.getTime() <= now;
+      slots.push({
+        start: `${String(h).padStart(2, '0')}:00`,
+        end: h + 1 === 24 ? '23:59' : `${String(h + 1).padStart(2, '0')}:00`,
+        available: court.isActive() && !busy && !past,
+        reason: busy ? 'reserved' : past ? 'past' : null,
+        slotLabel: TIME_SLOT_LABEL[timeSlotFromHour(h)],
+      });
+    }
+    return { courtId: court.id, date, slots };
+  }
+
+  async create(dto: CreateReservationDto, opts: { phoneVerified?: boolean } = {}): Promise<Reservation> {
     const court = await this.courts.findById(dto.courtId);
     const { category, price } = await this.resolveCategory(dto);
     const { start, end } = this.buildRange(dto.date, dto.startTime, dto.endTime);
@@ -111,6 +158,7 @@ export class ReservationsService {
       userCategory: category,
       categoryPrice: price,
       userDocument: dto.documentNumber ?? null,
+      verifiedAt: opts.phoneVerified ? new Date() : null,
     });
 
     // La reserva se crea sin pagar; la confirmación por WhatsApp se envía

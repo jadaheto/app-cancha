@@ -104,24 +104,20 @@ export class N8nWhatsappMessagingAdapter implements MessagingPort {
     switch (message.template) {
       case 'verification_code':
         return `Comfasucre canchas: tu código de verificación es ${v.code ?? ''}. Vence en 10 minutos. Si no solicitaste esta reserva, ignora este mensaje.`;
+      // Mensajes en una sola línea (sin saltos): el webhook los envía como
+      // parámetro de plantilla de WhatsApp, que no admite \n.
       case 'reservation_confirmed':
-        return [
-          `¡Hola ${v.nombre ?? ''}! Tu pago fue confirmado y tu reserva ${v.reserva_no ?? ''} quedó CONFIRMADA.`,
-          `Fecha: ${v.fecha ?? ''}`,
-          `Hora: ${v.hora ?? ''}`,
-          `Lugar: ${v.lugar ?? ''}`,
-          `Cancha: ${v.cancha ?? ''}`,
-          `Valor pagado: ${v.valor ?? ''}`,
-          `Gracias por reservar con Comfasucre.`,
-        ].join('\n');
+        return (
+          `¡Hola ${v.nombre ?? ''}! Tu pago fue confirmado y tu reserva ${v.reserva_no ?? ''} quedó confirmada ` +
+          `para el ${v.fecha ?? ''} de ${v.hora ?? ''} en ${v.cancha ?? ''} (${v.lugar ?? ''}). ` +
+          `Valor pagado: ${v.valor ?? ''}. Gracias por reservar con Comfasucre.`
+        );
       case 'reservation_reminder':
-        return [
-          `Hola ${v.nombre ?? ''}, tu reserva ${v.reserva_no ?? ''} tiene un pago pendiente de ${v.monto ?? ''}.`,
-          v.enlace_pago ? `Paga aquí: ${v.enlace_pago}` : '',
-          `Comfasucre.`,
-        ]
-          .filter(Boolean)
-          .join('\n');
+        return (
+          `Hola ${v.nombre ?? ''}, tu reserva ${v.reserva_no ?? ''} tiene un pago pendiente de ${v.monto ?? ''}.` +
+          (v.enlace_pago ? ` Paga aquí: ${v.enlace_pago}.` : '') +
+          ` Comfasucre.`
+        );
       default:
         return Object.values(v).join(' ');
     }

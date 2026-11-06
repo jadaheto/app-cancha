@@ -53,6 +53,10 @@ export class CreateReservationDto {
   @IsOptional() @IsBoolean()
   isAffiliate?: boolean;
 
+  @ApiPropertyOptional({ description: 'Token de verificación del celular (portal público)' })
+  @IsOptional() @IsString()
+  phoneToken?: string;
+
   @ApiPropertyOptional({ format: 'uuid', description: 'Vincular a un usuario existente' })
   @IsOptional() @IsUUID()
   userId?: string;

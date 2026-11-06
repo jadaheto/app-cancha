@@ -20,6 +20,7 @@ COPY package*.json ./
 RUN npm install --omit=dev && npm cache clean --force
 
 COPY --from=builder /app/dist ./dist
+RUN mkdir -p /app/uploads
 COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
 

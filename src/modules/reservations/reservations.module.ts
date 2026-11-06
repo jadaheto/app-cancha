@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CourtsModule } from '../courts/courts.module';
 import { UsersModule } from '../users/users.module';
 import { RESERVATION_REPOSITORY } from './domain/reservation.repository';
+import { PhoneVerificationService } from './application/phone-verification.service';
 import { ReservationsService } from './application/reservations.service';
 import { ReservationsController } from './infrastructure/reservations.controller';
 import { EpaycoWebhookController } from './infrastructure/epayco-webhook.controller';
@@ -14,8 +15,9 @@ import { TypeOrmReservationRepository } from './infrastructure/persistence/reser
   controllers: [ReservationsController, EpaycoWebhookController],
   providers: [
     ReservationsService,
+    PhoneVerificationService,
     { provide: RESERVATION_REPOSITORY, useClass: TypeOrmReservationRepository },
   ],
-  exports: [ReservationsService],
+  exports: [ReservationsService, PhoneVerificationService],
 })
 export class ReservationsModule {}

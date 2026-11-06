@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CourtsModule } from './modules/courts/courts.module';
+import { MediaModule } from './modules/media/media.module';
 import { PublicModule } from './modules/public/public.module';
 import { ReservationsModule } from './modules/reservations/reservations.module';
 import { SettingsModule } from './modules/settings/settings.module';
@@ -21,6 +22,7 @@ import { SharedModule } from './shared/shared.module';
     AuthModule,
     UsersModule,
     CourtsModule,
+    MediaModule,
     ReservationsModule,
     SettingsModule,
     AnalyticsModule,

@@ -3,6 +3,9 @@ import { loadEnv } from '../config/env';
 import { DOCUMENT_LOOKUP } from '../domain/ports/document-lookup.port';
 import { MESSAGING } from '../domain/ports/messaging.port';
 import { PAYMENT_GATEWAY } from '../domain/ports/payment-gateway.port';
+import { PHONE_VERIFICATION } from '../domain/ports/phone-verification.port';
+import { N8nPhoneVerificationAdapter } from './adapters/n8n-phone-verification.adapter';
+import { StubPhoneVerificationAdapter } from './adapters/stub-phone-verification.adapter';
 import { EpaycoPaymentGatewayAdapter } from './adapters/epayco-payment-gateway.adapter';
 import { MetaMessagingAdapter } from './adapters/meta-messaging.adapter';
 import { N8nWhatsappMessagingAdapter } from './adapters/n8n-whatsapp-messaging.adapter';
@@ -39,10 +42,18 @@ const documentLookupProvider: Provider = {
   useClass: StubDocumentLookupAdapter,
 };
 
+const phoneVerificationProvider: Provider = {
+  provide: PHONE_VERIFICATION,
+  useClass:
+    env.phoneVerification.provider === 'stub'
+      ? StubPhoneVerificationAdapter
+      : N8nPhoneVerificationAdapter,
+};
+
 @Global()
 @Module({
-  providers: [paymentProvider, messagingProvider, documentLookupProvider],
-  exports: [PAYMENT_GATEWAY, MESSAGING, DOCUMENT_LOOKUP],
+  providers: [paymentProvider, messagingProvider, documentLookupProvider, phoneVerificationProvider],
+  exports: [PAYMENT_GATEWAY, MESSAGING, DOCUMENT_LOOKUP, PHONE_VERIFICATION],
 })
 export class IntegrationsModule {
   constructor() {

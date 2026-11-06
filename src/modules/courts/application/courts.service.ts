@@ -1,9 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { EntityNotFoundException } from '../../../shared/domain/exceptions/domain.exception';
-import { Court } from '../domain/court';
+import { Court, GeoLocation } from '../domain/court';
 import { COURT_REPOSITORY, CourtRepository } from '../domain/court.repository';
-import { CreateCourtDto } from './dto/create-court.dto';
+import { CreateCourtDto, GeoLocationDto } from './dto/create-court.dto';
 import { UpdateCourtDto } from './dto/update-court.dto';
 import { rateMatrixFromDto } from './court.mapper';
 
@@ -42,6 +42,7 @@ export class CourtsService {
       attributes: dto.attributes ?? [],
       venueServices: dto.venueServices ?? [],
       hourlyRate: dto.hourlyRate ?? 0,
+      map: toGeo(dto.map),
       rates: rateMatrixFromDto(dto.rates),
       createdAt: new Date(),
     });
@@ -64,6 +65,7 @@ export class CourtsService {
     if (dto.attributes !== undefined) court.attributes = dto.attributes;
     if (dto.venueServices !== undefined) court.venueServices = dto.venueServices;
     if (dto.hourlyRate !== undefined) court.hourlyRate = dto.hourlyRate;
+    if (dto.map !== undefined) court.map = toGeo(dto.map);
     if (dto.rates !== undefined) court.rates = rateMatrixFromDto(dto.rates);
 
     return this.repo.update(court);
@@ -73,4 +75,13 @@ export class CourtsService {
     await this.findById(id);
     await this.repo.delete(id);
   }
+}
+
+/** Normaliza la ubicación recibida (campos ausentes → null). */
+function toGeo(map?: GeoLocationDto): GeoLocation {
+  return {
+    lat: typeof map?.lat === 'number' ? map.lat : null,
+    lng: typeof map?.lng === 'number' ? map.lng : null,
+    address: map?.address?.trim() || null,
+  };
 }
