@@ -4,6 +4,7 @@ import {
   PaymentGatewayPort,
   PaymentIntent,
   PaymentIntentResult,
+  PaymentVerification,
 } from '../../domain/ports/payment-gateway.port';
 
 /**
@@ -26,8 +27,9 @@ export class StubPaymentGatewayAdapter implements PaymentGatewayPort {
     };
   }
 
-  async verify(reference: string): Promise<{ status: 'pending' | 'approved' | 'rejected' }> {
-    this.logger.debug(`[STUB] Verificando pago ${reference} → approved`);
-    return { status: 'approved' };
+  async verify(query: { invoice: string; refPayco?: string }): Promise<PaymentVerification> {
+    this.logger.debug(`[STUB] Verificando pago de ${query.invoice} → pendiente`);
+    // El stub nunca aprueba solo: así no se confirman reservas sin pago real.
+    return { status: 'pending', invoice: query.invoice };
   }
 }

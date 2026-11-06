@@ -65,6 +65,18 @@ export interface AppEnv {
       reservationReminder: string;
     };
   };
+  /** Intermediario de pagos epayco_reacudo_rd (pagos.comfasucre.co). */
+  recaudo: {
+    baseUrl: string;
+    apiKey: string;
+    account: string;
+    sourceApp: string;
+    /** Forzar modo prueba en el checkout: true/false; null = lo decide el intermediario. */
+    testMode: boolean | null;
+    timeoutMs: number;
+    /** Cada cuántos segundos se revisan las reservas con pago pendiente (0 = desactivado). */
+    reconcileSeconds: number;
+  };
   /** Webhook de afiliados de n8n (el mismo de CLARA) para la categoría por documento. */
   affiliateLookup: {
     url: string;
@@ -163,6 +175,18 @@ export function loadEnv(): AppEnv {
         reservationReminder:
           process.env.META_TEMPLATE_RECORDATORIO ?? 'recordatorio_pago',
       },
+    },
+    recaudo: {
+      baseUrl: (process.env.RECAUDO_BASE_URL ?? 'https://pagos.comfasucre.co').replace(/\/+$/, ''),
+      apiKey: process.env.RECAUDO_API_KEY ?? '',
+      account: process.env.RECAUDO_ACCOUNT ?? 'recreacion_deporte',
+      sourceApp: process.env.RECAUDO_SOURCE_APP ?? 'app-cancha',
+      testMode:
+        process.env.RECAUDO_TEST_MODE === undefined || process.env.RECAUDO_TEST_MODE === ''
+          ? null
+          : bool(process.env.RECAUDO_TEST_MODE),
+      timeoutMs: parseInt(process.env.RECAUDO_TIMEOUT_MS ?? '20000', 10),
+      reconcileSeconds: parseInt(process.env.RECAUDO_RECONCILE_SECONDS ?? '120', 10),
     },
     affiliateLookup: {
       // AFFILIATE_LOOKUP_URL; N8N_WEBHOOK_URL se acepta por compatibilidad con .env anteriores.

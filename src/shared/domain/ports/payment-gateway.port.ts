@@ -16,11 +16,32 @@ export interface PaymentIntentResult {
   status: 'pending' | 'approved' | 'rejected';
 }
 
+/** Resultado de consultar una transacción en la pasarela por su referencia. */
+export interface PaymentVerification {
+  status: 'pending' | 'approved' | 'rejected';
+  /** Número de factura de la transacción (= id de la reserva). */
+  invoice?: string | null;
+  /** Monto cobrado. */
+  amount?: number | null;
+  currency?: string | null;
+  /** true si la pasarela ya validó la firma y el monto (intermediario de recaudo). */
+  verifiedByGateway?: boolean;
+  /** true si fue una transacción de prueba (sandbox). */
+  testRequest?: boolean | null;
+  refPayco?: string | null;
+  transactionId?: string | null;
+}
+
 /**
  * Puerto de pasarela de pagos. El sistema original integraba ePayco (PSE);
  * aquí es un puerto con adaptador stub por defecto.
  */
 export interface PaymentGatewayPort {
   createIntent(intent: PaymentIntent): Promise<PaymentIntentResult>;
-  verify(reference: string): Promise<{ status: 'pending' | 'approved' | 'rejected' }>;
+  /**
+   * Consulta en la pasarela el pago de una factura (= id de la reserva). `refPayco`
+   * (opcional) es la referencia que ePayco agrega al volver del checkout.
+   * Nunca confía en lo que diga el navegador.
+   */
+  verify(query: { invoice: string; refPayco?: string }): Promise<PaymentVerification>;
 }

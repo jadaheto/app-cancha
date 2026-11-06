@@ -61,7 +61,21 @@ export interface EpaycoConfirmationPayload {
   /** x_cod_response: 1 aceptada, 2 rechazada, 3 pendiente, 4 fallida. */
   codResponse: string;
   signature: string;
+  /** x_test_request: 'true' si la transacción fue de prueba. */
+  testRequest?: string;
 }
+
+/** Datos verificados de un pago, vengan del webhook (firmado) o de la API de ePayco. */
+interface VerifiedPayment {
+  status: 'pending' | 'approved' | 'rejected';
+  amount: number | null;
+  testRequest: boolean | null;
+  reference: string | null;
+  source: 'webhook' | 'consulta';
+}
+
+/** Tolerancia (pesos) al comparar el monto pagado con el valor de la reserva. */
+const AMOUNT_TOLERANCE = 1;
 
 @Injectable()
 export class ReservationsService {
@@ -78,6 +92,15 @@ export class ReservationsService {
 
   list(filters?: ReservationListFilters): Promise<Reservation[]> {
     return this.repo.findAll(filters);
+  }
+
+  /** Reservas con pago iniciado pero sin confirmar, creadas en los últimos `hours`. */
+  async listAwaitingPayment(hours: number): Promise<Reservation[]> {
+    const since = Date.now() - hours * 3_600_000;
+    const pending = await this.repo.findAll({ paymentStatus: PaymentStatus.PENDING });
+    return pending.filter(
+      (r) => r.totalAmount > 0 && r.status !== ReservationStatus.CANCELLED && (r.createdAt?.getTime() ?? 0) >= since,
+    );
   }
 
   /** Lista los pagos hechos y confirmados (reservas con pago en estado 'paid'). */
@@ -364,25 +387,87 @@ export class ReservationsService {
       return { ok: true, status: 'already_paid' };
     }
 
-    const reference = payload.refPayco || payload.transactionId || null;
     const cod = Number(payload.codResponse);
-    if (cod === 1) {
-      reservation.markPaid('epayco', reference);
-      await this.repo.update(reservation);
-      this.logger.log(
-        `Reserva ${reservation.id} marcada como PAGADA por ePayco (ref ${reference}).`,
+    const amount = parseFloat(String(payload.amount).replace(',', '.'));
+    const test = (payload.testRequest ?? '').trim().toLowerCase();
+    return this.applyPayment(reservation, {
+      status: cod === 1 ? 'approved' : cod === 3 ? 'pending' : 'rejected',
+      amount: Number.isFinite(amount) ? amount : null,
+      testRequest: test === '' ? null : test === 'true' || test === '1',
+      reference: payload.refPayco || payload.transactionId || null,
+      source: 'webhook',
+    });
+  }
+
+  /**
+   * Verificación ACTIVA del pago en la pasarela (intermediario de recaudo o ePayco):
+   * se consulta por la factura (= id de la reserva) y, si el cliente volvió del
+   * checkout, con el `ref_payco` que agrega ePayco. No se confía en el navegador:
+   * solo se confirma si la transacción es de esta reserva, está aceptada y el
+   * monto coincide. Sirve aunque la confirmación de ePayco no haya llegado.
+   * Idempotente.
+   */
+  async verifyPayment(reservationId: string, refPayco?: string): Promise<Reservation> {
+    const reservation = await this.getById(reservationId);
+    if (reservation.paymentStatus === PaymentStatus.PAID || reservation.totalAmount <= 0) return reservation;
+    const ref = (refPayco ?? '').trim();
+
+    const tx = await this.payments.verify({ invoice: reservation.id, refPayco: ref || undefined });
+    if (!tx.invoice || tx.invoice !== reservation.id) {
+      this.logger.warn(
+        `Verificación de pago: la transacción ${ref || tx.refPayco || 'n/d'} no corresponde a la reserva ${reservation.id} (factura ${tx.invoice ?? 'n/d'}).`,
       );
+      return reservation;
+    }
+    await this.applyPayment(reservation, {
+      status: tx.status,
+      amount: tx.amount ?? null,
+      testRequest: tx.testRequest ?? null,
+      reference: tx.refPayco || ref || null,
+      source: 'consulta',
+    });
+    return this.getById(reservation.id);
+  }
+
+  /**
+   * Regla única para aplicar un resultado de pago (webhook o consulta):
+   * - Aceptado solo si el monto pagado coincide con el valor de la reserva.
+   * - En producción (EPAYCO_TEST=false) se rechazan transacciones de prueba.
+   * - Al quedar pagada: confirma la reserva y envía el WhatsApp (una sola vez).
+   */
+  private async applyPayment(
+    reservation: Reservation,
+    tx: VerifiedPayment,
+  ): Promise<{ ok: boolean; status: string }> {
+    if (reservation.paymentStatus === PaymentStatus.PAID) {
+      return { ok: true, status: 'already_paid' };
+    }
+    const label = `Reserva ${reservation.id} (${tx.source}, ref ${tx.reference ?? 'n/d'})`;
+
+    if (tx.status === 'approved') {
+      if (tx.amount === null || Math.abs(tx.amount - reservation.totalAmount) > AMOUNT_TOLERANCE) {
+        this.logger.warn(
+          `${label}: monto pagado ${tx.amount ?? 'n/d'} no coincide con el valor ${reservation.totalAmount}. No se marca como pagada.`,
+        );
+        return { ok: false, status: 'amount_mismatch' };
+      }
+      if (!loadEnv().epayco.testMode && tx.testRequest === true) {
+        this.logger.warn(`${label}: transacción de PRUEBA recibida en producción. No se marca como pagada.`);
+        return { ok: false, status: 'test_transaction' };
+      }
+      reservation.markPaid('epayco', tx.reference);
+      await this.repo.update(reservation);
+      this.logger.log(`${label}: marcada como PAGADA.`);
       // El mensaje de WhatsApp sale aquí: cuando el pago queda confirmado.
       await this.sendReservationConfirmation(reservation);
       return { ok: true, status: 'paid' };
     }
 
-    // 3 = pendiente; cualquier otro (2 rechazada, 4 fallida...) queda sin pagar.
-    reservation.paymentReference = reference;
-    reservation.paymentStatus =
-      cod === 3 ? PaymentStatus.PENDING : PaymentStatus.UNPAID;
+    // Pendiente o rechazada: queda sin pagar (pendiente si ePayco aún no decide).
+    reservation.paymentReference = tx.reference ?? reservation.paymentReference;
+    reservation.paymentStatus = tx.status === 'pending' ? PaymentStatus.PENDING : PaymentStatus.UNPAID;
     await this.repo.update(reservation);
-    return { ok: true, status: cod === 3 ? 'pending' : 'rejected' };
+    return { ok: true, status: tx.status === 'pending' ? 'pending' : 'rejected' };
   }
 
   async delete(id: string): Promise<void> {

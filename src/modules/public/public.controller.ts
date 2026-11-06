@@ -11,6 +11,7 @@ import { reservationToView } from '../reservations/application/reservation.mappe
 import { ReservationsService } from '../reservations/application/reservations.service';
 import { PhoneVerificationService, normalizePhone } from '../reservations/application/phone-verification.service';
 import { SendPhoneCodeDto, VerifyPhoneCodeDto } from '../reservations/application/dto/phone-verification.dto';
+import { VerifyPaymentDto } from '../reservations/application/dto/verify-payment.dto';
 import { SettingsService } from '../settings/application/settings.service';
 
 /** Endpoints públicos (sin autenticación) para el portal y el flujo de reserva. */
@@ -114,6 +115,13 @@ export class PublicController {
   @ApiOperation({ summary: 'Inicia el pago de la reserva (checkout de ePayco)' })
   initPayment(@Param('id', ParseUUIDPipe) id: string) {
     return this.reservations.initPayment(id);
+  }
+
+  @Post('reservations/:id/verify-payment')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Consulta el pago en la pasarela (y el ref_payco del retorno, si llega) y confirma la reserva si corresponde' })
+  async verifyPayment(@Param('id', ParseUUIDPipe) id: string, @Body() dto: VerifyPaymentDto) {
+    return reservationToView(await this.reservations.verifyPayment(id, dto.refPayco));
   }
 
   @Get('reservations/:id')

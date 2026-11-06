@@ -5,6 +5,7 @@ import {
   PaymentGatewayPort,
   PaymentIntent,
   PaymentIntentResult,
+  PaymentVerification,
 } from '../../domain/ports/payment-gateway.port';
 
 /**
@@ -86,10 +87,9 @@ export class EpaycoPaymentGatewayAdapter implements PaymentGatewayPort {
    * (normalmente llega en el webhook/retorno); con el número de factura aún
    * sin pagar devuelve "pending".
    */
-  async verify(
-    reference: string,
-  ): Promise<{ status: 'pending' | 'approved' | 'rejected' }> {
-    const ref = reference.trim();
+  async verify(query: { invoice: string; refPayco?: string }): Promise<PaymentVerification> {
+    // ePayco directo solo puede consultar por ref_payco.
+    const ref = (query.refPayco ?? '').trim();
     if (ref === '') return { status: 'pending' };
 
     for (const base of EpaycoPaymentGatewayAdapter.REFERENCE_URLS) {
@@ -102,18 +102,9 @@ export class EpaycoPaymentGatewayAdapter implements PaymentGatewayPort {
         });
         clearTimeout(timer);
         if (!res.ok) continue;
-        const body = (await res.json()) as {
-          success?: boolean;
-          data?: { x_cod_response?: number | string; x_response?: string };
-        };
+        const body = (await res.json()) as { success?: boolean; data?: Record<string, unknown> };
         if (body?.success === false || !body?.data) continue;
-        const cod = Number(body.data.x_cod_response);
-        const text = (body.data.x_response ?? '').toLowerCase();
-        if (cod === 1 || text.includes('acept')) return { status: 'approved' };
-        if (cod === 2 || cod === 4 || text.includes('rechaz')) {
-          return { status: 'rejected' };
-        }
-        return { status: 'pending' };
+        return parseEpaycoValidation(body.data);
       } catch (error) {
         this.logger.warn(
           `No se pudo verificar la referencia ${ref}: ${(error as Error).message}`,
@@ -143,4 +134,31 @@ export class EpaycoPaymentGatewayAdapter implements PaymentGatewayPort {
   private md5(value: string): string {
     return createHash('md5').update(value, 'utf8').digest('hex');
   }
+}
+
+/**
+ * Interpreta `data` de la API de validación de ePayco
+ * (GET /validation/v1/reference/{ref_payco}).
+ */
+export function parseEpaycoValidation(data: Record<string, unknown>): PaymentVerification {
+  const text = (v: unknown) => (v === undefined || v === null ? '' : String(v).trim());
+  const cod = Number(text(data.x_cod_response) || text(data.x_cod_transaction_state));
+  const response = text(data.x_response).toLowerCase();
+  const status: PaymentVerification['status'] =
+    cod === 1 || response.includes('acept')
+      ? 'approved'
+      : cod === 2 || cod === 4 || cod === 9 || cod === 10 || cod === 11 || response.includes('rechaz') || response.includes('fallid')
+        ? 'rejected'
+        : 'pending';
+  const amount = parseFloat(text(data.x_amount).replace(',', '.'));
+  const test = text(data.x_test_request).toLowerCase();
+  return {
+    status,
+    invoice: text(data.x_id_invoice) || text(data.x_id_factura) || null,
+    amount: Number.isFinite(amount) ? amount : null,
+    currency: text(data.x_currency_code) || null,
+    testRequest: test === '' ? null : test === 'true' || test === '1',
+    refPayco: text(data.x_ref_payco) || null,
+    transactionId: text(data.x_transaction_id) || null,
+  };
 }

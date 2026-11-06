@@ -43,6 +43,7 @@ export class EpaycoWebhookController {
       currency: str(body.x_currency_code) || 'COP',
       codResponse: str(body.x_cod_response),
       signature: str((body as Record<string, unknown>).x_signature),
+      testRequest: str((body as Record<string, unknown>).x_test_request),
     };
     return this.reservations.confirmEpaycoPayment(payload);
   }

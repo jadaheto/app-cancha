@@ -4,6 +4,7 @@ import { CourtsModule } from '../courts/courts.module';
 import { SettingsModule } from '../settings/settings.module';
 import { UsersModule } from '../users/users.module';
 import { RESERVATION_REPOSITORY } from './domain/reservation.repository';
+import { PaymentReconciliationService } from './application/payment-reconciliation.service';
 import { PhoneVerificationService } from './application/phone-verification.service';
 import { ReservationsService } from './application/reservations.service';
 import { ReservationsController } from './infrastructure/reservations.controller';
@@ -17,6 +18,7 @@ import { TypeOrmReservationRepository } from './infrastructure/persistence/reser
   providers: [
     ReservationsService,
     PhoneVerificationService,
+    PaymentReconciliationService,
     { provide: RESERVATION_REPOSITORY, useClass: TypeOrmReservationRepository },
   ],
   exports: [ReservationsService, PhoneVerificationService],

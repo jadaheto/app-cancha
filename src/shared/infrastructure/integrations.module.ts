@@ -5,6 +5,7 @@ import { MESSAGING } from '../domain/ports/messaging.port';
 import { PAYMENT_GATEWAY } from '../domain/ports/payment-gateway.port';
 import { PHONE_VERIFICATION } from '../domain/ports/phone-verification.port';
 import { N8nDocumentLookupAdapter } from './adapters/n8n-document-lookup.adapter';
+import { RecaudoPaymentGatewayAdapter } from './adapters/recaudo-payment-gateway.adapter';
 import { N8nPhoneVerificationAdapter } from './adapters/n8n-phone-verification.adapter';
 import { StubPhoneVerificationAdapter } from './adapters/stub-phone-verification.adapter';
 import { EpaycoPaymentGatewayAdapter } from './adapters/epayco-payment-gateway.adapter';
@@ -24,10 +25,14 @@ const env = loadEnv();
  */
 const paymentProvider: Provider = {
   provide: PAYMENT_GATEWAY,
+  // recaudo: intermediario epayco_reacudo_rd (pagos.comfasucre.co) — recomendado.
+  // epayco: integración directa con ePayco. stub: pagos simulados (pruebas).
   useClass:
-    env.providers.payment === 'epayco'
-      ? EpaycoPaymentGatewayAdapter
-      : StubPaymentGatewayAdapter,
+    env.providers.payment === 'recaudo'
+      ? RecaudoPaymentGatewayAdapter
+      : env.providers.payment === 'epayco'
+        ? EpaycoPaymentGatewayAdapter
+        : StubPaymentGatewayAdapter,
 };
 const messagingProvider: Provider = {
   provide: MESSAGING,
@@ -65,7 +70,7 @@ export class IntegrationsModule {
     }
     const { payment, messaging, documentLookup } = env.providers;
     const unimplemented: string[] = [];
-    if (!['stub', 'epayco'].includes(payment)) unimplemented.push(`payment=${payment}`);
+    if (!['stub', 'epayco', 'recaudo'].includes(payment)) unimplemented.push(`payment=${payment}`);
     if (!['stub', 'meta', 'n8n'].includes(messaging)) unimplemented.push(`messaging=${messaging}`);
     if (!['stub', 'n8n'].includes(documentLookup)) unimplemented.push(`documentLookup=${documentLookup}`);
     if (unimplemented.length > 0) {
