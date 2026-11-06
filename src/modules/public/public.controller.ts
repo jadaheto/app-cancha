@@ -30,6 +30,13 @@ export class PublicController {
     return this.settings.getBrand();
   }
 
+  @Get('schedule')
+  @ApiOperation({ summary: 'Horario de atención del portal' })
+  async schedule() {
+    const { openHour, closeHour } = await this.settings.getSchedule();
+    return { openHour, closeHour };
+  }
+
   @Get('courts')
   @ApiOperation({ summary: 'Recursos activos disponibles para reservar' })
   async courtsList() {
@@ -85,7 +92,7 @@ export class PublicController {
     // La categoría la determina el documento, nunca el cliente.
     dto.category = undefined;
     dto.isAffiliate = undefined;
-    return reservationToView(await this.reservations.create(dto, { phoneVerified: true }));
+    return reservationToView(await this.reservations.create(dto, { phoneVerified: true, enforceSchedule: true }));
   }
 
   @Post('reservations/:id/send-verification')

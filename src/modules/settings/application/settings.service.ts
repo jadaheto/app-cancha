@@ -4,10 +4,13 @@ import {
   BrandConfig,
   DEFAULT_BRAND,
 } from '../domain/brand-config';
+import { loadEnv } from '../../../shared/config/env';
+import { SCHEDULE_KEYS, ScheduleConfig, assertValidSchedule } from '../domain/schedule-config';
 import { SETTING_REPOSITORY, SettingRepository } from '../domain/setting.repository';
+import { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { UpdateBrandDto } from './dto/update-brand.dto';
 
-/** Casos de uso de configuración (marca). */
+/** Casos de uso de configuración (marca y horario de atención). */
 @Injectable()
 export class SettingsService {
   constructor(@Inject(SETTING_REPOSITORY) private readonly repo: SettingRepository) {}
@@ -37,5 +40,38 @@ export class SettingsService {
       await this.repo.setMany(values);
     }
     return this.getBrand();
+  }
+
+  /**
+   * Horario de atención: lo guardado por el administrador o, si no hay nada,
+   * los valores por defecto de SCHEDULE_OPEN_HOUR / SCHEDULE_CLOSE_HOUR.
+   */
+  async getSchedule(): Promise<ScheduleConfig & { isDefault: boolean }> {
+    const defaults = loadEnv().schedule;
+    const stored = await this.repo.getAll();
+    const open = parseInt(stored[SCHEDULE_KEYS.openHour] ?? '', 10);
+    const close = parseInt(stored[SCHEDULE_KEYS.closeHour] ?? '', 10);
+    const candidate = { openHour: open, closeHour: close };
+    try {
+      assertValidSchedule(candidate);
+      return { ...candidate, isDefault: false };
+    } catch {
+      return { openHour: defaults.openHour, closeHour: defaults.closeHour, isDefault: true };
+    }
+  }
+
+  async updateSchedule(dto: UpdateScheduleDto): Promise<ScheduleConfig & { isDefault: boolean }> {
+    assertValidSchedule(dto);
+    await this.repo.setMany({
+      [SCHEDULE_KEYS.openHour]: String(dto.openHour),
+      [SCHEDULE_KEYS.closeHour]: String(dto.closeHour),
+    });
+    return this.getSchedule();
+  }
+
+  /** Vuelve a los valores por defecto del entorno. */
+  async resetSchedule(): Promise<ScheduleConfig & { isDefault: boolean }> {
+    await this.repo.setMany({ [SCHEDULE_KEYS.openHour]: '', [SCHEDULE_KEYS.closeHour]: '' });
+    return this.getSchedule();
   }
 }

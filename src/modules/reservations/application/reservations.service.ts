@@ -18,6 +18,8 @@ import {
   UserCategory,
 } from '../../../shared/domain/value-objects/user-category';
 import { CourtsService } from '../../courts/application/courts.service';
+import { SettingsService } from '../../settings/application/settings.service';
+import { isWithinSchedule } from '../../settings/domain/schedule-config';
 import { UsersService } from '../../users/application/users.service';
 import { PriceBreakdown, PricingService } from '../domain/pricing.service';
 import { TIME_SLOT_LABEL, timeSlotFromHour } from '../../../shared/domain/value-objects/time-slot';
@@ -71,6 +73,7 @@ export class ReservationsService {
     private readonly users: UsersService,
     @Inject(MESSAGING) private readonly messaging: MessagingPort,
     @Inject(PAYMENT_GATEWAY) private readonly payments: PaymentGatewayPort,
+    private readonly settings: SettingsService,
   ) {}
 
   list(filters?: ReservationListFilters): Promise<Reservation[]> {
@@ -108,7 +111,7 @@ export class ReservationsService {
    */
   async availability(courtId: string, date: string): Promise<AvailabilityView> {
     const court = await this.courts.findById(courtId);
-    const { openHour, closeHour } = loadEnv().schedule;
+    const { openHour, closeHour } = await this.settings.getSchedule();
     const dayStart = new Date(`${date}T00:00:00-05:00`);
     if (Number.isNaN(dayStart.getTime())) throw new ConflictException('Fecha inválida');
     const dayEnd = new Date(dayStart.getTime() + 24 * 3_600_000);
@@ -132,10 +135,25 @@ export class ReservationsService {
     return { courtId: court.id, date, slots };
   }
 
-  async create(dto: CreateReservationDto, opts: { phoneVerified?: boolean } = {}): Promise<Reservation> {
+  async create(
+    dto: CreateReservationDto,
+    opts: { phoneVerified?: boolean; enforceSchedule?: boolean } = {},
+  ): Promise<Reservation> {
     const court = await this.courts.findById(dto.courtId);
     const { category, price } = await this.resolveCategory(dto);
     const { start, end } = this.buildRange(dto.date, dto.startTime, dto.endTime);
+
+    // En el portal solo se reserva dentro del horario de atención (el panel no tiene esa restricción).
+    if (opts.enforceSchedule) {
+      const schedule = await this.settings.getSchedule();
+      const toHours = (t: string) => { const [h, m] = t.split(':').map(Number); return h + m / 60; };
+      const endHour = dto.endTime === '23:59' ? 24 : toHours(dto.endTime);
+      if (!isWithinSchedule(schedule, toHours(dto.startTime), endHour)) {
+        throw new ConflictException(
+          `El horario de atención es de ${String(schedule.openHour).padStart(2, '0')}:00 a ${String(schedule.closeHour).padStart(2, '0')}:00`,
+        );
+      }
+    }
 
     await this.assertAvailable(court.id, start, end);
 
