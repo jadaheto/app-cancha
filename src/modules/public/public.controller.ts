@@ -124,6 +124,25 @@ export class PublicController {
     return reservationToView(await this.reservations.verifyPayment(id, dto.refPayco));
   }
 
+  @Post('reservations/:id/payment-confirmation')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Doble confirmación del pago: resultado de ePayco + confirmación de Comfasucre' })
+  async paymentConfirmation(@Param('id', ParseUUIDPipe) id: string, @Body() dto: VerifyPaymentDto) {
+    const { reservation, gateway } = await this.reservations.checkPayment(id, dto.refPayco);
+    return {
+      reservation: reservationToView(reservation),
+      gateway: gateway && {
+        status: gateway.status,
+        refPayco: gateway.refPayco ?? null,
+        responseMessage: gateway.responseMessage ?? null,
+        franchise: gateway.franchise ?? null,
+        amount: gateway.amount ?? null,
+        transactionDate: gateway.transactionDate ?? null,
+        testRequest: gateway.testRequest ?? null,
+      },
+    };
+  }
+
   @Get('reservations/:id')
   @ApiOperation({ summary: 'Detalle de una reserva (confirmación)' })
   async findOne(@Param('id', ParseUUIDPipe) id: string) {

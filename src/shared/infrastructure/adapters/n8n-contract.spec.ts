@@ -162,7 +162,7 @@ describe('parseEpaycoValidation (API de validación de ePayco)', () => {
     expect(parseEpaycoValidation({
       x_cod_response: 1, x_response: 'Aceptada', x_id_invoice: 'abc', x_amount: '65000', x_currency_code: 'COP',
       x_test_request: 'TRUE', x_ref_payco: '999', x_transaction_id: 't1',
-    })).toEqual({ status: 'approved', invoice: 'abc', amount: 65000, currency: 'COP', testRequest: true, refPayco: '999', transactionId: 't1' });
+    })).toEqual({ status: 'approved', invoice: 'abc', amount: 65000, currency: 'COP', testRequest: true, refPayco: '999', transactionId: 't1', responseMessage: 'Aceptada', franchise: null, transactionDate: null });
     expect(parseEpaycoValidation({ x_cod_response: '2', x_response: 'Rechazada' }).status).toBe('rejected');
     expect(parseEpaycoValidation({ x_cod_response: '3', x_response: 'Pendiente' }).status).toBe('pending');
   });

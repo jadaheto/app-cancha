@@ -16,7 +16,8 @@ import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../../../shared/infrastructure/auth/jwt-auth.guard';
 import { ReservationsService } from '../application/reservations.service';
 import { reservationToView } from '../application/reservation.mapper';
-import { CreateReservationDto } from '../application/dto/create-reservation.dto';
+import { AdminCreateReservationDto, CashPaymentDto } from '../application/dto/admin-reservation.dto';
+import { CurrentUser, CurrentUserData } from '../../../shared/infrastructure/auth/current-user.decorator';
 import { QuoteDto } from '../application/dto/quote.dto';
 import { UpdateStatusDto, VerifyCodeDto } from '../application/dto/update-status.dto';
 
@@ -63,9 +64,28 @@ export class ReservationsController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Crea una reserva' })
-  async create(@Body() dto: CreateReservationDto) {
-    return reservationToView(await this.reservations.create(dto));
+  @ApiOperation({ summary: 'Crea una reserva desde el panel, pagada en caja o con link de ePayco' })
+  async create(@Body() dto: AdminCreateReservationDto, @CurrentUser() admin: CurrentUserData) {
+    const { reservation, checkoutUrl, paymentError } = await this.reservations.createByAdmin(dto, admin?.username ?? 'admin');
+    return { ...reservationToView(reservation), checkoutUrl, paymentError: paymentError ?? null };
+  }
+
+  @Post(':id/cash-payment')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Registra el pago de la reserva recibido en caja' })
+  async cashPayment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CashPaymentDto,
+    @CurrentUser() admin: CurrentUserData,
+  ) {
+    return reservationToView(await this.reservations.registerCashPayment(id, dto.reference, admin?.username ?? 'admin'));
+  }
+
+  @Post(':id/verify-payment')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Consulta el pago en la pasarela y lo aplica si corresponde' })
+  async verifyPayment(@Param('id', ParseUUIDPipe) id: string) {
+    return reservationToView(await this.reservations.verifyPayment(id));
   }
 
   @Patch(':id/status')

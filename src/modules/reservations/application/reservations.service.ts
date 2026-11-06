@@ -10,6 +10,7 @@ import { MESSAGING, MessagingPort } from '../../../shared/domain/ports/messaging
 import {
   PAYMENT_GATEWAY,
   PaymentGatewayPort,
+  PaymentVerification,
 } from '../../../shared/domain/ports/payment-gateway.port';
 import {
   assertCategory,
@@ -328,6 +329,55 @@ export class ReservationsService {
     return this.repo.update(reservation);
   }
 
+  /**
+   * Reserva creada por un administrador (sin verificación de celular ni límite de
+   * horario). `caja`: queda pagada y confirmada al instante. `epayco`: se genera el
+   * link de pago para enviárselo al cliente; la conciliación la confirma al pagar.
+   */
+  async createByAdmin(
+    dto: CreateReservationDto & { paymentMethod: 'caja' | 'epayco'; cashReference?: string },
+    adminName: string,
+  ): Promise<{ reservation: Reservation; checkoutUrl: string | null; paymentError?: string }> {
+    const note = `Creada en el panel por ${adminName} · pago: ${dto.paymentMethod === 'caja' ? 'caja' : 'ePayco'}`;
+    const created = await this.create({ ...dto, notes: dto.notes ? `${dto.notes} · ${note}` : note });
+    if (created.totalAmount <= 0) return { reservation: created, checkoutUrl: null };
+    if (dto.paymentMethod === 'caja') {
+      return { reservation: await this.registerCashPayment(created.id, dto.cashReference, adminName), checkoutUrl: null };
+    }
+    try {
+      const payment = await this.initPayment(created.id);
+      return { reservation: await this.getById(created.id), checkoutUrl: payment.checkoutUrl };
+    } catch (error) {
+      // La reserva ya existe: se conserva y el link se puede generar luego desde el listado.
+      this.logger.warn(`Reserva ${created.id} creada, pero no se pudo generar el link de pago: ${(error as Error).message}`);
+      return {
+        reservation: await this.getById(created.id),
+        checkoutUrl: null,
+        paymentError: (error as Error).message || 'No se pudo generar el link de pago',
+      };
+    }
+  }
+
+  /** Registra el pago recibido en caja: queda pagada, confirmada y se envía el WhatsApp. */
+  async registerCashPayment(id: string, reference: string | undefined, adminName: string): Promise<Reservation> {
+    const reservation = await this.getById(id);
+    if (reservation.paymentStatus === PaymentStatus.PAID) {
+      throw new ConflictException('La reserva ya está pagada');
+    }
+    if (reservation.status === ReservationStatus.CANCELLED) {
+      throw new ConflictException('No se puede registrar el pago de una reserva cancelada');
+    }
+    const ref = reference?.trim() || null;
+    reservation.markPaid('caja', ref);
+    reservation.notes = [reservation.notes, `Pago en caja${ref ? ` (recibo ${ref})` : ''} registrado por ${adminName}`]
+      .filter(Boolean)
+      .join(' · ');
+    await this.repo.update(reservation);
+    this.logger.log(`Reserva ${reservation.id}: pago en CAJA registrado por ${adminName}${ref ? ` (recibo ${ref})` : ''}.`);
+    await this.sendReservationConfirmation(reservation);
+    return reservation;
+  }
+
   /** Inicia el pago a través de la pasarela (puerto). */
   async initPayment(id: string, method = 'epayco'): Promise<{
     reference: string;
@@ -408,25 +458,48 @@ export class ReservationsService {
    * Idempotente.
    */
   async verifyPayment(reservationId: string, refPayco?: string): Promise<Reservation> {
-    const reservation = await this.getById(reservationId);
-    if (reservation.paymentStatus === PaymentStatus.PAID || reservation.totalAmount <= 0) return reservation;
-    const ref = (refPayco ?? '').trim();
+    const current = await this.getById(reservationId);
+    if (current.paymentStatus === PaymentStatus.PAID || current.totalAmount <= 0) return current;
+    return (await this.checkPayment(reservationId, refPayco)).reservation;
+  }
 
-    const tx = await this.payments.verify({ invoice: reservation.id, refPayco: ref || undefined });
+  /**
+   * Doble confirmación para la página de confirmación de pago: el resultado que
+   * reporta ePayco (vía la pasarela) y el estado de la reserva en Comfasucre.
+   * Los pagos en caja no consultan la pasarela.
+   */
+  async checkPayment(
+    reservationId: string,
+    refPayco?: string,
+  ): Promise<{ reservation: Reservation; gateway: PaymentVerification | null }> {
+    const reservation = await this.getById(reservationId);
+    if (reservation.totalAmount <= 0 || reservation.paymentMethod === 'caja') {
+      return { reservation, gateway: null };
+    }
+    const ref = (refPayco ?? '').trim() || (reservation.paymentStatus === PaymentStatus.PAID ? reservation.paymentReference ?? '' : '');
+    let tx: PaymentVerification;
+    try {
+      tx = await this.payments.verify({ invoice: reservation.id, refPayco: ref || undefined });
+    } catch (error) {
+      this.logger.warn(`No se pudo consultar el pago de la reserva ${reservation.id}: ${(error as Error).message}`);
+      return { reservation, gateway: null };
+    }
     if (!tx.invoice || tx.invoice !== reservation.id) {
       this.logger.warn(
         `Verificación de pago: la transacción ${ref || tx.refPayco || 'n/d'} no corresponde a la reserva ${reservation.id} (factura ${tx.invoice ?? 'n/d'}).`,
       );
-      return reservation;
+      return { reservation, gateway: null };
     }
+    if (reservation.paymentStatus === PaymentStatus.PAID) return { reservation, gateway: tx };
     await this.applyPayment(reservation, {
       status: tx.status,
       amount: tx.amount ?? null,
       testRequest: tx.testRequest ?? null,
-      reference: tx.refPayco || ref || null,
+      // Solo se guarda una referencia que venga de la pasarela, nunca la de la URL.
+      reference: tx.refPayco || null,
       source: 'consulta',
     });
-    return this.getById(reservation.id);
+    return { reservation: await this.getById(reservation.id), gateway: tx };
   }
 
   /**

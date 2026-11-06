@@ -20,6 +20,9 @@ export interface RecaudoTransaction {
   amountOk?: boolean;
   account?: string | null;
   payload?: Record<string, unknown> | null;
+  responseMessage?: string;
+  franchise?: string;
+  transactionDate?: string;
   createdAt?: string;
 }
 
@@ -149,6 +152,9 @@ export function pickTransaction(rows: RecaudoTransaction[], invoice: string): Pa
     refPayco: chosen.refPayco ?? null,
     transactionId: chosen.transactionId ?? null,
     verifiedByGateway: chosen === approved,
+    responseMessage: chosen.responseMessage || null,
+    franchise: chosen.franchise || null,
+    transactionDate: chosen.transactionDate || chosen.createdAt || null,
   };
 }
 

@@ -160,5 +160,8 @@ export function parseEpaycoValidation(data: Record<string, unknown>): PaymentVer
     testRequest: test === '' ? null : test === 'true' || test === '1',
     refPayco: text(data.x_ref_payco) || null,
     transactionId: text(data.x_transaction_id) || null,
+    responseMessage: text(data.x_response) || null,
+    franchise: text(data.x_franchise) || null,
+    transactionDate: text(data.x_transaction_date) || text(data.x_fecha_transaccion) || null,
   };
 }

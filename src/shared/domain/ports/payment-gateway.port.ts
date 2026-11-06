@@ -30,6 +30,12 @@ export interface PaymentVerification {
   testRequest?: boolean | null;
   refPayco?: string | null;
   transactionId?: string | null;
+  /** Texto de ePayco ("Aceptada", "Rechazada"…). */
+  responseMessage?: string | null;
+  /** Medio de pago (VISA, PSE, Nequi…). */
+  franchise?: string | null;
+  /** Fecha de la transacción según ePayco. */
+  transactionDate?: string | null;
 }
 
 /**

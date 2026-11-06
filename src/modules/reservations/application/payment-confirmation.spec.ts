@@ -92,6 +92,12 @@ describe('Verificación activa con la API de ePayco (ref_payco del retorno)', ()
     expect(messaging.send).toHaveBeenCalledTimes(1);
   });
 
+  it('no guarda la ref_payco de la URL si la pasarela no la confirma', async () => {
+    const { svc, store } = setup({ verification: { status: 'pending', invoice: ID } });
+    await svc.verifyPayment(ID, 'INVENTADA');
+    expect(store.get(ID)!.paymentReference).not.toBe('INVENTADA');
+  });
+
   it('ignora una referencia de OTRA reserva (no se puede reutilizar un pago ajeno)', async () => {
     const { svc } = setup({ verification: { ...approved, invoice: '22222222-2222-4222-8222-222222222222' } });
     expect((await svc.verifyPayment(ID, 'REF9')).paymentStatus).not.toBe(PaymentStatus.PAID);
@@ -118,5 +124,46 @@ describe('Verificación activa con la API de ePayco (ref_payco del retorno)', ()
     await svc.verifyPayment(ID, 'REF9');
     await svc.verifyPayment(ID, 'REF9');
     expect(payments.verify).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Pago en caja (panel)', () => {
+  it('queda pagada y confirmada, con recibo y quién la registró, y envía el WhatsApp', async () => {
+    const { svc, store, messaging } = setup();
+    const r = await svc.registerCashPayment(ID, ' RC-0045 ', 'admin');
+    expect(r.paymentStatus).toBe(PaymentStatus.PAID);
+    expect(r.status).toBe(ReservationStatus.CONFIRMED);
+    expect(r.paymentMethod).toBe('caja');
+    expect(r.paymentReference).toBe('RC-0045');
+    expect(store.get(ID)!.notes).toContain('Pago en caja (recibo RC-0045) registrado por admin');
+    expect(messaging.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('no permite registrar dos veces ni pagar una cancelada', async () => {
+    const { svc, store } = setup();
+    await svc.registerCashPayment(ID, undefined, 'admin');
+    await expect(svc.registerCashPayment(ID, undefined, 'admin')).rejects.toThrow(/ya está pagada/);
+    const { svc: svc2, store: s2 } = setup();
+    s2.get(ID)!.status = ReservationStatus.CANCELLED;
+    await expect(svc2.registerCashPayment(ID, undefined, 'admin')).rejects.toThrow(/cancelada/);
+    expect(store.size).toBe(1);
+  });
+
+  it('la confirmación de pago de una reserva pagada en caja no consulta la pasarela', async () => {
+    const { svc, payments } = setup();
+    await svc.registerCashPayment(ID, 'RC-1', 'admin');
+    const { reservation, gateway } = await svc.checkPayment(ID);
+    expect(reservation.paymentMethod).toBe('caja');
+    expect(gateway).toBeNull();
+    expect(payments.verify).not.toHaveBeenCalled();
+  });
+});
+
+describe('Doble confirmación (página de confirmación de pago)', () => {
+  it('devuelve el resultado de ePayco junto con la reserva confirmada', async () => {
+    const { svc } = setup({ verification: { status: 'approved', invoice: ID, amount: 65000, testRequest: true, refPayco: 'R7', responseMessage: 'Aceptada', franchise: 'VISA' } });
+    const { reservation, gateway } = await svc.checkPayment(ID, 'R7');
+    expect(reservation.paymentStatus).toBe(PaymentStatus.PAID);
+    expect(gateway).toMatchObject({ status: 'approved', refPayco: 'R7', responseMessage: 'Aceptada', franchise: 'VISA' });
   });
 });
