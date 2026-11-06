@@ -2,7 +2,7 @@
  * Pruebas de contrato con los webhooks de n8n de Comfasucre. Simulan `fetch` y
  * comprueban que cada petición tiene la misma forma que los ejemplos entregados (PHP/cURL):
  *  - enviar-codigo:    POST multipart { phone }                                       + Authorization
- *  - validar-codigo:   POST multipart { phone, codigo }                               (sin Authorization)
+ *  - validar-codigo:   POST multipart { phone, codigo }                               + Authorization
  *  - campaña WhatsApp: POST multipart { telefonos, campaign_id, mensaje, wait_seconds } + Authorization
  * La credencial es ficticia: solo se verifica que la cabecera configurada se envía tal cual.
  */
@@ -76,14 +76,14 @@ describe('enviar-codigo', () => {
 });
 
 describe('validar-codigo', () => {
-  it('envía phone y codigo por multipart, sin Authorization', async () => {
+  it('envía phone y codigo por multipart, con la misma cabecera Authorization', async () => {
     const calls = mockFetch([{ body: '{"valido":true}' }]);
     const ok = await new N8nPhoneVerificationAdapter().checkCode('3015894392', '311832');
     expect(ok).toBe(true);
     expect(calls[0]).toEqual({
       url: 'https://n8n.iacomfasucre.com/webhook/validar-codigo',
       method: 'POST',
-      headers: {},
+      headers: { Authorization: AUTH },
       fields: { phone: '3015894392', codigo: '311832' },
     });
   });

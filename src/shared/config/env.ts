@@ -162,9 +162,14 @@ export function loadEnv(): AppEnv {
       provider: process.env.PHONE_VERIFICATION_PROVIDER ?? 'n8n',
       sendUrl: process.env.PHONE_VERIFICATION_SEND_URL ?? 'https://n8n.iacomfasucre.com/webhook/enviar-codigo',
       validateUrl: process.env.PHONE_VERIFICATION_VALIDATE_URL ?? 'https://n8n.iacomfasucre.com/webhook/validar-codigo',
-      // Por defecto usa la misma cabecera Basic del webhook de WhatsApp.
-      sendAuthorization: process.env.PHONE_VERIFICATION_AUTHORIZATION ?? process.env.WHATSAPP_AUTHORIZATION ?? '',
-      validateAuthorization: process.env.PHONE_VERIFICATION_VALIDATE_AUTHORIZATION ?? '',
+      // Todos los webhooks de n8n usan la misma cabecera Basic (WHATSAPP_AUTHORIZATION)
+      // salvo que se defina una propia para enviar o validar el código.
+      sendAuthorization: process.env.PHONE_VERIFICATION_AUTHORIZATION || process.env.WHATSAPP_AUTHORIZATION || '',
+      validateAuthorization:
+        process.env.PHONE_VERIFICATION_VALIDATE_AUTHORIZATION ||
+        process.env.PHONE_VERIFICATION_AUTHORIZATION ||
+        process.env.WHATSAPP_AUTHORIZATION ||
+        '',
       timeoutMs: parseInt(process.env.PHONE_VERIFICATION_TIMEOUT_MS ?? '20000', 10),
       tokenTtlMinutes: parseInt(process.env.PHONE_VERIFICATION_TOKEN_TTL_MINUTES ?? '30', 10),
     },
