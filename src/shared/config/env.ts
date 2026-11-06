@@ -27,6 +27,8 @@ export interface AppEnv {
   };
   /** Carpeta donde se guardan las imágenes subidas. */
   uploadsDir: string;
+  /** Saltos de proxy de confianza para obtener la IP del cliente (Express 'trust proxy'). */
+  trustProxy: number;
   schedule: {
     openHour: number;
     closeHour: number;
@@ -118,6 +120,7 @@ export function loadEnv(): AppEnv {
       name: process.env.SEED_ADMIN_NAME ?? 'Administrador Comfasucre',
     },
     uploadsDir: process.env.UPLOADS_DIR ?? './uploads',
+    trustProxy: parseInt(process.env.TRUST_PROXY ?? '1', 10),
     schedule: {
       // Horario de atención para la grilla de disponibilidad (horas 0–24, Bogotá).
       openHour: parseInt(process.env.SCHEDULE_OPEN_HOUR ?? '6', 10),

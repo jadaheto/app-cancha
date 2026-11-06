@@ -1,5 +1,5 @@
 import {
-  BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query,
+  BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Ip, Param, ParseUUIDPipe, Post, Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { courtToView } from '../courts/application/court.mapper';
@@ -71,8 +71,8 @@ export class PublicController {
   @Post('phone/send-code')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Envía un código por WhatsApp para verificar el celular' })
-  sendPhoneCode(@Body() dto: SendPhoneCodeDto) {
-    return this.phones.sendCode(dto.phone);
+  sendPhoneCode(@Body() dto: SendPhoneCodeDto, @Ip() ip: string) {
+    return this.phones.sendCode(dto.phone, ip);
   }
 
   @Post('phone/verify')

@@ -38,3 +38,14 @@ describe('PhoneVerificationService', () => {
     expect(port.checkCode).toHaveBeenCalledTimes(5);
   });
 });
+
+describe('PhoneVerificationService · límite por IP', () => {
+  it('máximo 10 envíos por hora desde la misma IP aunque sean celulares distintos', async () => {
+    const port = { sendCode: jest.fn().mockResolvedValue(undefined), checkCode: jest.fn() };
+    const svc = new PhoneVerificationService(port);
+    for (let i = 0; i < 10; i++) await svc.sendCode(`30000000${String(i).padStart(2, '0')}`, '1.2.3.4');
+    await expect(svc.sendCode('3000000099', '1.2.3.4')).rejects.toThrow(/demasiados códigos/);
+    await expect(svc.sendCode('3000000099', '5.6.7.8')).resolves.toBeDefined();
+    expect(port.sendCode).toHaveBeenCalledTimes(11);
+  });
+});

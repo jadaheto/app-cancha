@@ -4,6 +4,7 @@ import {
   MessagingPort,
   OutboundMessage,
 } from '../../domain/ports/messaging.port';
+import { describeFetchError } from './n8n-phone-verification.adapter';
 
 /** Tope de caracteres del parámetro de la plantilla de WhatsApp. */
 const MAX_MENSAJE = 1000;
@@ -86,11 +87,7 @@ export class N8nWhatsappMessagingAdapter implements MessagingPort {
       );
       return { delivered: true, providerMessageId };
     } catch (error) {
-      const err = error as Error;
-      const detalle =
-        err.name === 'TimeoutError' || err.name === 'AbortError'
-          ? `tiempo de espera agotado (${Math.round(this.cfg.timeoutMs / 1000)} s)`
-          : err.message;
+      const detalle = describeFetchError(error);
       this.logger.warn(
         `WhatsApp (n8n) a ${telefono} sin respuesta del webhook: ${detalle}`,
       );
@@ -108,9 +105,10 @@ export class N8nWhatsappMessagingAdapter implements MessagingPort {
       // parámetro de plantilla de WhatsApp, que no admite \n.
       case 'reservation_confirmed':
         return (
-          `¡Hola ${v.nombre ?? ''}! Tu pago fue confirmado y tu reserva ${v.reserva_no ?? ''} quedó confirmada ` +
+          `¡Hola ${v.nombre ?? ''}! ${v.sin_costo === 'si' ? 'Tu reserva' : 'Tu pago fue confirmado y tu reserva'} ${v.reserva_no ?? ''} quedó confirmada ` +
           `para el ${v.fecha ?? ''} de ${v.hora ?? ''} en ${v.cancha ?? ''} (${v.lugar ?? ''}). ` +
-          `Valor pagado: ${v.valor ?? ''}. Gracias por reservar con Comfasucre.`
+          (v.sin_costo === 'si' ? 'Reserva sin costo. ' : `Valor pagado: ${v.valor ?? ''}. `) +
+          `Gracias por reservar con Comfasucre.`
         );
       case 'reservation_reminder':
         return (

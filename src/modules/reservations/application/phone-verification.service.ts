@@ -11,6 +11,11 @@ const RESEND_COOLDOWN_MS = 60_000;
 const MAX_SENDS_PER_HOUR = 5;
 const MAX_ATTEMPTS = 5;
 const ATTEMPT_WINDOW_MS = 10 * 60_000;
+/** Envíos de código por IP por hora (evita gastar WhatsApp enviando a muchos números). */
+const MAX_SENDS_PER_IP_PER_HOUR = 10;
+const HOUR_MS = 3_600_000;
+/** Por encima de este tamaño se depuran las entradas vencidas. */
+const PRUNE_THRESHOLD = 5_000;
 
 interface PhoneState {
   sends: number[];      // marcas de tiempo de envíos (última hora)
@@ -37,6 +42,7 @@ export function normalizePhone(phone: string): string {
 @Injectable()
 export class PhoneVerificationService {
   private readonly state = new Map<string, PhoneState>();
+  private readonly ipSends = new Map<string, number[]>();
   private readonly secret: string;
   private readonly ttlMs: number;
 
@@ -47,9 +53,17 @@ export class PhoneVerificationService {
     this.ttlMs = env.phoneVerification.tokenTtlMinutes * 60_000;
   }
 
-  async sendCode(rawPhone: string): Promise<{ sent: true; phone: string; retryAfterSeconds: number }> {
+  async sendCode(
+    rawPhone: string,
+    ip?: string,
+  ): Promise<{ sent: true; phone: string; retryAfterSeconds: number }> {
     const phone = normalizePhone(rawPhone);
     const now = Date.now();
+    this.prune(now);
+    const fromIp = ip ? (this.ipSends.get(ip) ?? []).filter((t) => now - t < HOUR_MS) : [];
+    if (ip && fromIp.length >= MAX_SENDS_PER_IP_PER_HOUR) {
+      throw new HttpException('Se han solicitado demasiados códigos desde esta conexión. Intenta más tarde', HttpStatus.TOO_MANY_REQUESTS);
+    }
     const st = this.get(phone, now);
     const last = st.sends[st.sends.length - 1];
     if (last && now - last < RESEND_COOLDOWN_MS) {
@@ -61,6 +75,7 @@ export class PhoneVerificationService {
     }
     await this.provider.sendCode(phone);
     st.sends.push(now);
+    if (ip) this.ipSends.set(ip, [...fromIp, now]);
     st.attempts = [];
     return { sent: true, phone: maskPhone(phone), retryAfterSeconds: RESEND_COOLDOWN_MS / 1000 };
   }
@@ -119,9 +134,20 @@ export class PhoneVerificationService {
     return createHmac('sha256', this.secret).update(body).digest('base64url');
   }
 
+  /** Limpia entradas sin actividad reciente para que la memoria no crezca sin límite. */
+  private prune(now: number): void {
+    if (this.state.size + this.ipSends.size < PRUNE_THRESHOLD) return;
+    for (const [k, st] of this.state) {
+      if (!st.sends.some((t) => now - t < HOUR_MS) && !st.attempts.some((t) => now - t < ATTEMPT_WINDOW_MS)) this.state.delete(k);
+    }
+    for (const [k, ts] of this.ipSends) {
+      if (!ts.some((t) => now - t < HOUR_MS)) this.ipSends.delete(k);
+    }
+  }
+
   private get(phone: string, now: number): PhoneState {
     const st = this.state.get(phone) ?? { sends: [], attempts: [] };
-    st.sends = st.sends.filter((t) => now - t < 3_600_000);
+    st.sends = st.sends.filter((t) => now - t < HOUR_MS);
     st.attempts = st.attempts.filter((t) => now - t < ATTEMPT_WINDOW_MS);
     this.state.set(phone, st);
     return st;

@@ -14,6 +14,8 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   app.setGlobalPrefix('api');
+  // Detrás del proxy de Easypanel (Traefik): la IP real del cliente viene en X-Forwarded-For.
+  app.set('trust proxy', env.trustProxy);
 
   // Imágenes subidas desde el panel (fotos de canchas): públicas y cacheables.
   const uploadsDir = resolve(env.uploadsDir);

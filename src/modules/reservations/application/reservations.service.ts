@@ -179,8 +179,17 @@ export class ReservationsService {
       verifiedAt: opts.phoneVerified ? new Date() : null,
     });
 
-    // La reserva se crea sin pagar; la confirmación por WhatsApp se envía
-    // cuando el pago queda confirmado (ver confirmEpaycoPayment).
+    // Reserva sin costo: no pasa por la pasarela, queda confirmada de inmediato
+    // y el WhatsApp de confirmación sale ya.
+    if (reservation.totalAmount <= 0) {
+      reservation.confirm();
+      const saved = await this.repo.create(reservation);
+      await this.sendReservationConfirmation(saved);
+      return saved;
+    }
+
+    // Reserva con costo: se crea sin pagar; la confirmación por WhatsApp se
+    // envía cuando ePayco confirma el pago (ver confirmEpaycoPayment).
     return this.repo.create(reservation);
   }
 
@@ -211,6 +220,7 @@ export class ReservationsService {
           lugar: lugar?.trim() || 'Comfasucre',
           cancha: reservation.courtName ?? '',
           valor: this.formatCurrency(reservation.totalAmount),
+          sin_costo: reservation.totalAmount <= 0 ? 'si' : 'no',
         },
       });
     } catch (error) {
