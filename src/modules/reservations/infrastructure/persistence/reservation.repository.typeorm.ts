@@ -95,6 +95,8 @@ export class TypeOrmReservationRepository implements ReservationRepository {
       paymentMethod: r.paymentMethod,
       paymentReference: r.paymentReference,
       paidAt: r.paidAt,
+      paymentExpiresAt: r.paymentExpiresAt,
+      expiredAt: r.expiredAt,
       createdAt: r.createdAt,
     });
   }
@@ -123,6 +125,8 @@ export class TypeOrmReservationRepository implements ReservationRepository {
     entity.paymentMethod = r.paymentMethod;
     entity.paymentReference = r.paymentReference;
     entity.paidAt = r.paidAt;
+    entity.paymentExpiresAt = r.paymentExpiresAt;
+    entity.expiredAt = r.expiredAt;
     return entity;
   }
 }

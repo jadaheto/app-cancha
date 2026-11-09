@@ -40,6 +40,10 @@ export interface ReservationProps {
   paymentMethod?: string | null;
   paymentReference?: string | null;
   paidAt?: Date | null;
+  /** Plazo para pagar; vencido sin pago, se libera el horario. */
+  paymentExpiresAt?: Date | null;
+  /** Cuándo se liberó por falta de pago (null = no vencida). */
+  expiredAt?: Date | null;
   createdAt?: Date;
 }
 
@@ -67,6 +71,8 @@ export class Reservation {
   paymentMethod: string | null;
   paymentReference: string | null;
   paidAt: Date | null;
+  paymentExpiresAt: Date | null;
+  expiredAt: Date | null;
   readonly createdAt: Date;
 
   constructor(props: ReservationProps) {
@@ -95,6 +101,8 @@ export class Reservation {
     this.paymentMethod = props.paymentMethod ?? null;
     this.paymentReference = props.paymentReference ?? null;
     this.paidAt = props.paidAt ?? null;
+    this.paymentExpiresAt = props.paymentExpiresAt ?? null;
+    this.expiredAt = props.expiredAt ?? null;
     this.createdAt = props.createdAt ?? new Date();
   }
 
@@ -144,5 +152,23 @@ export class Reservation {
     if (this.status === ReservationStatus.PENDING) {
       this.status = ReservationStatus.CONFIRMED;
     }
+  }
+
+  /** true si sigue esperando pago y ya pasó su plazo. */
+  isPaymentOverdue(now: Date = new Date()): boolean {
+    return (
+      this.status === ReservationStatus.PENDING &&
+      this.paymentStatus !== PaymentStatus.PAID &&
+      this.totalAmount > 0 &&
+      this.paymentExpiresAt !== null &&
+      this.paymentExpiresAt.getTime() <= now.getTime()
+    );
+  }
+
+  /** Libera el horario por falta de pago. */
+  expire(now: Date = new Date()): void {
+    this.status = ReservationStatus.CANCELLED;
+    this.expiredAt = now;
+    if (this.paymentStatus === PaymentStatus.PENDING) this.paymentStatus = PaymentStatus.UNPAID;
   }
 }

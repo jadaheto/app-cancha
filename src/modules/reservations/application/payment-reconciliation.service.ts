@@ -15,12 +15,23 @@ const LOOKBACK_HOURS = 48;
 export class PaymentReconciliationService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(PaymentReconciliationService.name);
   private timer: ReturnType<typeof setInterval> | null = null;
+  private expiryTimer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private expiring = false;
 
   constructor(private readonly reservations: ReservationsService) {}
 
   onApplicationBootstrap(): void {
     const env = loadEnv();
+    // Vencimiento de reservas sin pago (cualquier pasarela).
+    const every = env.paymentHold.checkSeconds;
+    if (every > 0) {
+      this.expiryTimer = setInterval(() => void this.expire(), every * 1000);
+      this.expiryTimer.unref?.();
+      this.logger.log(
+        `Vencimiento de reservas sin pago: ${env.paymentHold.minutes} min (panel ${env.paymentHold.adminMinutes} min), revisión cada ${every} s.`,
+      );
+    }
     const seconds = env.recaudo.reconcileSeconds;
     if (env.providers.payment !== 'recaudo' || !(seconds > 0)) return;
     this.timer = setInterval(() => void this.run(), seconds * 1000);
@@ -30,6 +41,21 @@ export class PaymentReconciliationService implements OnApplicationBootstrap, OnM
 
   onModuleDestroy(): void {
     if (this.timer) clearInterval(this.timer);
+    if (this.expiryTimer) clearInterval(this.expiryTimer);
+  }
+
+  /** Libera las reservas vencidas sin pago. No lanza. */
+  async expire(): Promise<void> {
+    if (this.expiring) return;
+    this.expiring = true;
+    try {
+      const r = await this.reservations.expireOverdue();
+      if (r.expired || r.paid) this.logger.log(`Vencimiento: ${r.expired} liberadas, ${r.paid} pagadas, ${r.waiting} en espera.`);
+    } catch (error) {
+      this.logger.warn(`Vencimiento de reservas falló: ${(error as Error).message}`);
+    } finally {
+      this.expiring = false;
+    }
   }
 
   /** Revisa una vez todas las reservas con pago pendiente. No lanza. */

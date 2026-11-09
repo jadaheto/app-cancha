@@ -37,6 +37,8 @@ export class ReservationOrmEntity {
   @Column({ name: 'payment_method', type: 'varchar', nullable: true }) paymentMethod!: string | null;
   @Column({ name: 'epayco_reference', type: 'varchar', nullable: true }) paymentReference!: string | null;
   @Column({ name: 'paid_at', type: 'timestamp', nullable: true }) paidAt!: Date | null;
+  @Column({ name: 'payment_expires_at', type: 'timestamptz', nullable: true }) paymentExpiresAt!: Date | null;
+  @Column({ name: 'expired_at', type: 'timestamptz', nullable: true }) expiredAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' }) createdAt!: Date;
 }

@@ -2,6 +2,7 @@ import {
   BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Ip, Param, ParseUUIDPipe, Post, Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { loadEnv } from '../../shared/config/env';
 import { courtToView } from '../courts/application/court.mapper';
 import { CourtsService } from '../courts/application/courts.service';
 import { CreateReservationDto } from '../reservations/application/dto/create-reservation.dto';
@@ -32,10 +33,10 @@ export class PublicController {
   }
 
   @Get('schedule')
-  @ApiOperation({ summary: 'Horario de atención del portal' })
+  @ApiOperation({ summary: 'Horario de atención del portal y minutos para pagar una reserva' })
   async schedule() {
     const { openHour, closeHour } = await this.settings.getSchedule();
-    return { openHour, closeHour };
+    return { openHour, closeHour, paymentHoldMinutes: loadEnv().paymentHold.minutes };
   }
 
   @Get('courts')

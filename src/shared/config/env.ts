@@ -65,6 +65,17 @@ export interface AppEnv {
       reservationReminder: string;
     };
   };
+  /** Vencimiento de reservas sin pago. */
+  paymentHold: {
+    /** Minutos para pagar antes de liberar el horario (portal). */
+    minutes: number;
+    /** Minutos para pagar un link enviado desde el panel. */
+    adminMinutes: number;
+    /** Espera máxima (desde la creación) si ePayco reporta un pago en proceso (PSE). */
+    graceMinutes: number;
+    /** Cada cuántos segundos se revisan las reservas vencidas (0 = desactivado). */
+    checkSeconds: number;
+  };
   /** Intermediario de pagos epayco_reacudo_rd (pagos.comfasucre.co). */
   recaudo: {
     baseUrl: string;
@@ -176,6 +187,12 @@ export function loadEnv(): AppEnv {
           process.env.META_TEMPLATE_RECORDATORIO ?? 'recordatorio_pago',
       },
     },
+    paymentHold: {
+      minutes: positiveInt(process.env.PAYMENT_HOLD_MINUTES, 10),
+      adminMinutes: positiveInt(process.env.PAYMENT_HOLD_MINUTES_ADMIN, positiveInt(process.env.PAYMENT_HOLD_MINUTES, 10)),
+      graceMinutes: positiveInt(process.env.PAYMENT_GRACE_MINUTES, 60),
+      checkSeconds: nonNegativeInt(process.env.PAYMENT_EXPIRY_CHECK_SECONDS, 60),
+    },
     recaudo: {
       baseUrl: (process.env.RECAUDO_BASE_URL ?? 'https://pagos.comfasucre.co').replace(/\/+$/, ''),
       apiKey: process.env.RECAUDO_API_KEY ?? '',
@@ -218,4 +235,16 @@ export function loadEnv(): AppEnv {
       timeoutMs: parseInt(process.env.WHATSAPP_TIMEOUT_MS ?? '20000', 10),
     },
   };
+}
+
+/** Entero > 0; vacío o inválido → valor por defecto. */
+function positiveInt(value: string | undefined, fallback: number): number {
+  const n = parseInt((value ?? '').trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/** Entero >= 0 (0 = desactivado); vacío o inválido → valor por defecto. */
+function nonNegativeInt(value: string | undefined, fallback: number): number {
+  const n = parseInt((value ?? '').trim(), 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
 }

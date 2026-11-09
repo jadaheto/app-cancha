@@ -99,8 +99,15 @@ export class ReservationsService {
   async listAwaitingPayment(hours: number): Promise<Reservation[]> {
     const since = Date.now() - hours * 3_600_000;
     const pending = await this.repo.findAll({ paymentStatus: PaymentStatus.PENDING });
-    return pending.filter(
-      (r) => r.totalAmount > 0 && r.status !== ReservationStatus.CANCELLED && (r.createdAt?.getTime() ?? 0) >= since,
+    // También las vencidas hace poco: un pago tardío se aplica (reactiva o marca reembolso).
+    const expired = (await this.repo.findAll({ status: ReservationStatus.CANCELLED })).filter(
+      (r) => !!r.expiredAt && r.paymentStatus !== PaymentStatus.PAID && r.paymentMethod === 'epayco',
+    );
+    return [...pending, ...expired].filter(
+      (r) =>
+        r.totalAmount > 0 &&
+        (r.status !== ReservationStatus.CANCELLED || !!r.expiredAt) &&
+        (r.createdAt?.getTime() ?? 0) >= since,
     );
   }
 
@@ -161,7 +168,7 @@ export class ReservationsService {
 
   async create(
     dto: CreateReservationDto,
-    opts: { phoneVerified?: boolean; enforceSchedule?: boolean } = {},
+    opts: { phoneVerified?: boolean; enforceSchedule?: boolean; holdMinutes?: number } = {},
   ): Promise<Reservation> {
     const court = await this.courts.findById(dto.courtId);
     const { category, price } = await this.resolveCategory(dto);
@@ -201,6 +208,11 @@ export class ReservationsService {
       categoryPrice: price,
       userDocument: dto.documentNumber ?? null,
       verifiedAt: opts.phoneVerified ? new Date() : null,
+      // Plazo para pagar: vencido sin pago, se libera el horario (ver expireOverdue).
+      paymentExpiresAt:
+        breakdown.total > 0
+          ? new Date(Date.now() + (opts.holdMinutes ?? loadEnv().paymentHold.minutes) * 60_000)
+          : null,
     });
 
     // Reserva sin costo: no pasa por la pasarela, queda confirmada de inmediato
@@ -339,7 +351,10 @@ export class ReservationsService {
     adminName: string,
   ): Promise<{ reservation: Reservation; checkoutUrl: string | null; paymentError?: string }> {
     const note = `Creada en el panel por ${adminName} · pago: ${dto.paymentMethod === 'caja' ? 'caja' : 'ePayco'}`;
-    const created = await this.create({ ...dto, notes: dto.notes ? `${dto.notes} · ${note}` : note });
+    const created = await this.create(
+      { ...dto, notes: dto.notes ? `${dto.notes} · ${note}` : note },
+      { holdMinutes: loadEnv().paymentHold.adminMinutes },
+    );
     if (created.totalAmount <= 0) return { reservation: created, checkoutUrl: null };
     if (dto.paymentMethod === 'caja') {
       return { reservation: await this.registerCashPayment(created.id, dto.cashReference, adminName), checkoutUrl: null };
@@ -387,6 +402,12 @@ export class ReservationsService {
     const reservation = await this.getById(id);
     if (reservation.paymentStatus === PaymentStatus.PAID) {
       throw new ConflictException('La reserva ya está pagada');
+    }
+    if (reservation.expiredAt || reservation.isPaymentOverdue()) {
+      throw new ConflictException('El plazo para pagar esta reserva venció y el horario se liberó. Haz una nueva reserva.');
+    }
+    if (reservation.status === ReservationStatus.CANCELLED) {
+      throw new ConflictException('La reserva está cancelada');
     }
     const intent = await this.payments.createIntent({
       reservationId: reservation.id,
@@ -471,7 +492,7 @@ export class ReservationsService {
   async checkPayment(
     reservationId: string,
     refPayco?: string,
-  ): Promise<{ reservation: Reservation; gateway: PaymentVerification | null }> {
+  ): Promise<{ reservation: Reservation; gateway: PaymentVerification | null; gatewayError?: boolean }> {
     const reservation = await this.getById(reservationId);
     if (reservation.totalAmount <= 0 || reservation.paymentMethod === 'caja') {
       return { reservation, gateway: null };
@@ -482,7 +503,7 @@ export class ReservationsService {
       tx = await this.payments.verify({ invoice: reservation.id, refPayco: ref || undefined });
     } catch (error) {
       this.logger.warn(`No se pudo consultar el pago de la reserva ${reservation.id}: ${(error as Error).message}`);
-      return { reservation, gateway: null };
+      return { reservation, gateway: null, gatewayError: true };
     }
     if (!tx.invoice || tx.invoice !== reservation.id) {
       this.logger.warn(
@@ -528,6 +549,10 @@ export class ReservationsService {
         this.logger.warn(`${label}: transacción de PRUEBA recibida en producción. No se marca como pagada.`);
         return { ok: false, status: 'test_transaction' };
       }
+      // Pago que llega después de vencer el plazo (el horario ya se había liberado).
+      if (reservation.status === ReservationStatus.CANCELLED) {
+        return this.applyLatePayment(reservation, tx, label);
+      }
       reservation.markPaid('epayco', tx.reference);
       await this.repo.update(reservation);
       this.logger.log(`${label}: marcada como PAGADA.`);
@@ -541,6 +566,79 @@ export class ReservationsService {
     reservation.paymentStatus = tx.status === 'pending' ? PaymentStatus.PENDING : PaymentStatus.UNPAID;
     await this.repo.update(reservation);
     return { ok: true, status: tx.status === 'pending' ? 'pending' : 'rejected' };
+  }
+
+  /**
+   * Pago aprobado de una reserva ya liberada por vencimiento: si el horario sigue
+   * libre se reactiva y confirma; si otra persona lo tomó, queda pagada pero
+   * cancelada con nota de REEMBOLSO para que el administrador la gestione.
+   */
+  private async applyLatePayment(
+    reservation: Reservation,
+    tx: VerifiedPayment,
+    label: string,
+  ): Promise<{ ok: boolean; status: string }> {
+    const overlapping = (await this.repo.findOverlapping(reservation.courtId, reservation.startTime, reservation.endTime))
+      .filter((r) => r.id !== reservation.id);
+    reservation.paymentStatus = PaymentStatus.PAID;
+    reservation.paymentMethod = 'epayco';
+    reservation.paymentReference = tx.reference;
+    reservation.paidAt = new Date();
+    if (overlapping.length === 0) {
+      reservation.status = ReservationStatus.CONFIRMED;
+      reservation.expiredAt = null;
+      reservation.notes = [reservation.notes, 'Pago recibido después del plazo: reserva reactivada'].filter(Boolean).join(' · ');
+      await this.repo.update(reservation);
+      this.logger.log(`${label}: pago tardío, horario libre → reserva REACTIVADA y pagada.`);
+      await this.sendReservationConfirmation(reservation);
+      return { ok: true, status: 'paid' };
+    }
+    reservation.notes = [reservation.notes, 'PAGO RECIBIDO TRAS VENCER: el horario ya fue tomado, requiere REEMBOLSO']
+      .filter(Boolean)
+      .join(' · ');
+    await this.repo.update(reservation);
+    this.logger.warn(`${label}: pago tardío pero el horario ya está ocupado → requiere REEMBOLSO.`);
+    return { ok: true, status: 'paid_requires_refund' };
+  }
+
+  /**
+   * Libera las reservas cuyo plazo para pagar venció. Antes de liberar consulta la
+   * pasarela: si ya se pagó, se confirma; si ePayco reporta un pago EN PROCESO
+   * (p. ej. PSE), espera hasta `graceMinutes` desde la creación.
+   */
+  async expireOverdue(now: Date = new Date()): Promise<{ expired: number; paid: number; waiting: number }> {
+    const { minutes, graceMinutes } = loadEnv().paymentHold;
+    const pending = await this.repo.findAll({ status: ReservationStatus.PENDING });
+    const overdue = pending.filter((r) => {
+      if (r.paymentStatus === PaymentStatus.PAID || r.totalAmount <= 0 || r.paymentMethod === 'caja') return false;
+      // Reservas anteriores al plazo (sin payment_expires_at): creación + plazo.
+      const deadline = r.paymentExpiresAt ?? new Date(r.createdAt.getTime() + minutes * 60_000);
+      return deadline.getTime() <= now.getTime();
+    });
+
+    let expired = 0;
+    let paid = 0;
+    let waiting = 0;
+    for (const r of overdue) {
+      const { reservation, gateway, gatewayError } = await this.checkPayment(r.id);
+      if (reservation.paymentStatus === PaymentStatus.PAID) { paid++; continue; }
+      // Pago en proceso en ePayco, o la pasarela no respondió: no se libera a ciegas.
+      const inProcess = (gateway?.status === 'pending' && !!gateway.refPayco) || !!gatewayError;
+      const graceEnds = reservation.createdAt.getTime() + graceMinutes * 60_000;
+      if (inProcess && now.getTime() < graceEnds) {
+        waiting++;
+        this.logger.log(
+          `Reserva ${reservation.id}: plazo vencido pero ${gatewayError ? 'la pasarela no respondió' : 'ePayco reporta un pago en proceso'}; se espera.`,
+        );
+        continue;
+      }
+      reservation.expire(now);
+      reservation.notes = [reservation.notes, 'Vencida: sin pago dentro del plazo, horario liberado'].filter(Boolean).join(' · ');
+      await this.repo.update(reservation);
+      expired++;
+      this.logger.log(`Reserva ${reservation.id} VENCIDA por falta de pago: horario liberado.`);
+    }
+    return { expired, paid, waiting };
   }
 
   async delete(id: string): Promise<void> {

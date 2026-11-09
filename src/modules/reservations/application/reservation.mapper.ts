@@ -24,6 +24,8 @@ export function reservationToView(r: Reservation) {
     notes: r.notes,
     verifiedAt: r.verifiedAt,
     paidAt: r.paidAt,
+    paymentExpiresAt: r.paymentExpiresAt,
+    expiredAt: r.expiredAt,
     createdAt: r.createdAt,
   };
 }
